@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tinyqueue
+      POSTGRES_PASSWORD: tinyqueue
+      POSTGRES_DB: tinyqueue
+    ports:
+      - "5432:5432"
+    volumes:
+      - tinyqueue_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinyqueue"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tinyqueue:tinyqueue@postgres:5432/tinyqueue
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tinyqueue:tinyqueue@postgres:5432/tinyqueue
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.queue.worker", "--workers", "4"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tinyqueue:tinyqueue@postgres:5432/tinyqueue
+      LOG_LEVEL: INFO
+      WORKER_COUNT: "4"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  tinyqueue_pgdata:
